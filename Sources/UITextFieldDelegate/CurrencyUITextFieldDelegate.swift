@@ -14,17 +14,17 @@ import CurrencyFormatter
 
 /// Custom text field delegate
 public class CurrencyUITextFieldDelegate: NSObject {
-
+    
     public var formatter: CurrencyFormatterProtocol!
-
+    
     /// Text field clears its text when value value is equal to zero
     public var clearsWhenValueIsZero: Bool = false
-
+    
     override public init() {
         super.init()
         self.formatter = CurrencyFormatter()
     }
-
+    
     public init(formatter: CurrencyFormatter) {
         self.formatter = formatter
     }
@@ -33,37 +33,34 @@ public class CurrencyUITextFieldDelegate: NSObject {
 // MARK: - UITextFieldDelegate
 
 extension CurrencyUITextFieldDelegate: UITextFieldDelegate {
-
+    
     public func textFieldDidBeginEditing(_ textField: UITextField) {
         textField.setInitialSelectedTextRange()
     }
-
+    
     @discardableResult
     public func textField(_ textField: UITextField, shouldChangeCharactersIn range: NSRange, replacementString string: String) -> Bool {
-
-        // Store selected text range offset from end, before updating and reformatting the currency string.
-        let lastSelectedTextRangeOffsetFromEnd = textField.selectedTextRangeOffsetFromEnd
-
-        // Before leaving the scope, update selected text range,
-        // respecting previous selected text range offset from end.
-        defer {
-            textField.updateSelectedTextRange(lastOffsetFromEnd: lastSelectedTextRangeOffsetFromEnd)
-        }
-
+        
         guard !string.isEmpty else {
-            handleDeletion(in: textField, at: range)
+            handleCursor(textField: textField, changingCharactersIn: range) {
+                handleDeletion(in: textField, at: range)
+            }
             return false
         }
         guard string.hasNumbers else {
-            addNegativeSymbolIfNeeded(in: textField, at: range, replacementString: string)
+            handleCursor(textField: textField, changingCharactersIn: range) {
+                addNegativeSymbolIfNeeded(in: textField, at: range, replacementString: string)
+            }
             return false
         }
-
-        setFormattedText(in: textField, inputString: string, range: range)
-
+        
+        handleCursor(textField: textField, changingCharactersIn: range) {
+            setFormattedText(in: textField, inputString: string, range: range)
+        }
+        
         return false
     }
-
+    
     @discardableResult
     public func textFieldShouldEndEditing(_ textField: UITextField) -> Bool {
         if let text = textField.text, text.representsZero && clearsWhenValueIsZero {
@@ -76,7 +73,18 @@ extension CurrencyUITextFieldDelegate: UITextFieldDelegate {
 // MARK: - Private
 
 extension CurrencyUITextFieldDelegate {
-
+    
+    private func handleCursor(textField: UITextField, changingCharactersIn range: NSRange, _ fieldAlterationAction: () -> Void ) {
+        let preFormatLen = textField.text?.count ?? 0
+        fieldAlterationAction()
+        let postFormatLen = textField.text?.count ?? 0
+        let lengthChange = postFormatLen - preFormatLen
+        let cursorPos = range.location + range.length + lengthChange
+        if let newPosition = textField.position(from: textField.beginningOfDocument, offset: cursorPos) {
+            textField.selectedTextRange = textField.textRange(from: newPosition, to: newPosition)
+        }
+    }
+    
     /// Verifies if user inputed a negative symbol at the first lowest
     /// bound of the text field and add it.
     ///
@@ -86,16 +94,16 @@ extension CurrencyUITextFieldDelegate {
     ///   - string: user input string
     private func addNegativeSymbolIfNeeded(in textField: UITextField, at range: NSRange, replacementString string: String) {
         guard textField.keyboardType == .numbersAndPunctuation else { return }
-
+        
         if string == .negativeSymbol && textField.text?.isEmpty == true {
             textField.text = .negativeSymbol
         } else if range.lowerBound == 0 && string == .negativeSymbol &&
             textField.text?.contains(String.negativeSymbol) == false {
-
+            
             textField.text = .negativeSymbol + (textField.text ?? "")
         }
     }
-
+    
     /// Correctly delete characters when user taps remove key.
     ///
     /// - Parameters:
@@ -108,11 +116,15 @@ extension CurrencyUITextFieldDelegate {
             } else {
                 text.removeLast()
             }
-
-            textField.text = formatter.updated(formattedString: text)
+            
+            if text.count > 0 {
+                textField.text = formatter.updated(formattedString: text)
+            } else {
+                textField.text = text
+            }
         }
     }
-
+    
     /// Formats text field's text with new input string and changed range
     ///
     /// - Parameters:
@@ -121,21 +133,26 @@ extension CurrencyUITextFieldDelegate {
     ///   - range: range where the string should be added
     private func setFormattedText(in textField: UITextField, inputString: String, range: NSRange) {
         var updatedText = ""
-
+        
         if let text = textField.text {
             if text.isEmpty {
-                updatedText = formatter.initialText + inputString
+                if text.count > 0 {
+                    updatedText = formatter.initialText + inputString
+                } else {
+                    updatedText = formatter.string(from: Double(inputString)) ?? "0.0"
+                }
             } else if let range = Range(range, in: text) {
                 updatedText = text.replacingCharacters(in: range, with: inputString)
             } else {
                 updatedText = text.appending(inputString)
             }
         }
-
+        
         if updatedText.numeralFormat().count > formatter.maxDigitsCount {
             updatedText.removeLast()
         }
-
+        
         textField.text = formatter.updated(formattedString: updatedText)
     }
 }
+
